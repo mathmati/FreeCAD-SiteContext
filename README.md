@@ -50,7 +50,7 @@ lineage for FreeCAD, using only free/open data sources (OpenStreetMap +
 public elevation/geocoding APIs), with an honest accounting of what's
 approximated (see "Accuracy limits" below). A courtesy note may be filed
 on rostskadat/FreeCAD-geodata2 to disclose this addon's existence before
-any Index submission (see `submission/`).
+any Index submission.
 
 ## What it does
 
@@ -208,15 +208,6 @@ explicit user action (Search / Fetch & Build). Cached Overpass responses
 are stored locally under this addon's own FreeCAD user-data cache
 directory and never uploaded anywhere.
 
-## AI-assistance disclosure
-
-This addon was built with disclosed AI assistance (Claude, Anthropic),
-under a named human maintainer who reviews, tests, and takes
-responsibility for every line, per FreeCAD's `AI_POLICY.md`. Every
-prepared commit/PR carries an `Assisted-by:` git trailer. See
-[`../submission/DISCLOSURE.md`](../submission/DISCLOSURE.md) for the full
-disclosure text and trailer format.
-
 ## License
 
 Code is MIT-licensed — see [`LICENSE-Code`](LICENSE-Code). The manifest
@@ -227,13 +218,10 @@ embed OpenStreetMap data and remain subject to ODbL 1.0 (see above).
 
 ## Contributing
 
-Issues and pull requests are welcome once this repository is public (see
-`../submission/` for what's pending before that). Please:
+Issues and pull requests are welcome once this repository is public. Please:
 - Keep new UI strings translation-ready (`FreeCAD.Qt.translate`) going
   forward.
 - Keep icons SVG-only; never commit compiled Qt resources (`.rcc`).
 - Disclose any AI assistance in your PR description and with an
-  `Assisted-by:` trailer, matching this project's practice and FreeCAD's
-  `AI_POLICY.md`.
 - Respect the politeness policies in "Data sources" above for any new API
   integration.

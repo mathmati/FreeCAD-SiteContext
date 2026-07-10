@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_USER_AGENT = "FreeCAD-SiteContext-addon/0.2 (oss-unlock mission 3 v0.2; contact: addon maintainer TBD)"
+NOMINATIM_USER_AGENT = "FreeCAD-SiteContext-addon/0.2 (+https://github.com/mathmati; contact via GitHub)"
 MIN_REQUEST_INTERVAL_S = 1.0
 
 _last_call_at = [0.0]
