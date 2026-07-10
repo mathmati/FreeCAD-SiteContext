@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <style>
+      .ground { fill:#7fae63; stroke:#4f7a3a; stroke-width:1.5; }
+      .bldg   { fill:#d9b98a; stroke:#8a6a45; stroke-width:1.2; }
+      .bldg2  { fill:#c9a878; stroke:#8a6a45; stroke-width:1.2; }
+      .pin    { fill:#c0392b; stroke:#7c2015; stroke-width:1.5; }
+    </style>
+  </defs>
+
+  <!-- ground plane -->
+  <polygon class="ground" points="4,46 32,58 60,46 32,34" />
+
+  <!-- buildings (simple extruded blocks) -->
+  <g>
+    <polygon class="bldg" points="14,44 14,30 24,26 24,40" />
+    <polygon class="bldg2" points="14,30 24,26 30,28 20,32" />
+
+    <polygon class="bldg" points="30,50 30,32 42,27 42,45" />
+    <polygon class="bldg2" points="30,32 42,27 48,29 36,34" />
+  </g>
+
+  <!-- location pin -->
+  <path class="pin" d="M46 8 C38 8 32 14 32 22 C32 32 46 46 46 46 C46 46 60 32 60 22 C60 14 54 8 46 8 Z" />
+  <circle cx="46" cy="21" r="6" fill="#ffffff" />
+</svg>
