@@ -8,7 +8,7 @@ building footprints and coarse terrain elevation around it, then builds a
 design against.
 
 This is v0.2, the first real addon build, evolved from a headless
-prototype (`../sitecontext_proto.py` in this repo, kept for history) that
+prototype that
 proved the fetch → project → extrude → assemble pipeline end to end.
 
 ## Heritage & prior art
