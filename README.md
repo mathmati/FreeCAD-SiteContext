@@ -210,7 +210,7 @@ directory and never uploaded anywhere.
 
 ## License
 
-Code is MIT-licensed — see [`LICENSE-Code`](LICENSE-Code). The manifest
+Code is MIT-licensed — see [`LICENSE`](LICENSE). The manifest
 (`package.xml`) declares the same SPDX identifier consistently. The icon
 (`Resources/Icons/sitecontext.svg`) is original artwork under the same
 MIT license. Generated site models are NOT covered by this license — they
