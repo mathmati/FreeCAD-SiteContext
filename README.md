@@ -225,3 +225,7 @@ Issues and pull requests are welcome once this repository is public. Please:
 - Disclose any AI assistance in your PR description and with an
 - Respect the politeness policies in "Data sources" above for any new API
   integration.
+
+## Transparency
+
+Built with [Claude Code](https://claude.com/claude-code).
