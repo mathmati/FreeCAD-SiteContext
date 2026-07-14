@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>SiteContext</name>
-  <description>FreeCAD's "Add Location": fetch real OpenStreetMap building footprints and coarse terrain around a place or lat/lon, and build a 3D site context model grouped under "SiteContext". The SketchUp/BlenderGIS Add-Location experience on fully open data.</description>
+  <description>Pick a place and get a 3D site model: OpenStreetMap buildings extruded on real terrain, georeferenced, all from open data. Like SketchUp's Add Location.</description>
   <version>0.2.0</version>
   <date>2026-07-10</date>
   <maintainer email="177616452+mathmati@users.noreply.github.com">mathmati</maintainer>
