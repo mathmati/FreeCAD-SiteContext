@@ -94,5 +94,10 @@ def main():
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# Not guarded by __name__ == "__main__": stock freecadcmd sets __name__ to
+# the script basename, so a guarded run would silently do nothing and exit 0
+# (same gotcha the headless harness hit). This file only executes when run
+# explicitly via freecadcmd, so running unconditionally is safe.
+_rc = main()
+sys.stdout.flush()
+os._exit(_rc)

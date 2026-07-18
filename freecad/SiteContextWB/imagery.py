@@ -3,10 +3,13 @@
 bbox, stitch them into one image, and hand site_builder.py enough geometry
 to place it as a flat, correctly-scaled Image::ImagePlane.
 
-Tile sources ("providers") are small dicts in PROVIDERS. The default is Esri
-World Imagery (satellite/aerial); the OpenStreetMap standard tile layer is
-offered as the plain-map alternative. Provider discipline, same ethos as the
-rest of the addon:
+Tile sources ("providers") are small dicts in PROVIDERS. The default is the
+OpenStreetMap standard tile layer: its tile usage policy explicitly allows
+this kind of light, cached, attributed use. Esri World Imagery
+(satellite/aerial) is offered as an opt-in alternative; its tiles are
+publicly served but Esri's terms are written around ArcGIS products, so we
+do not make it the default. Provider discipline, same ethos as the rest of
+the addon:
 
   - A descriptive User-Agent on every request (both providers require one;
     OSM's tile usage policy names it explicitly, Esri's terms ask for an
@@ -21,7 +24,9 @@ rest of the addon:
     explicitly encourages caching.
   - Attribution: every provider's credit string travels with the result and
     is written into the document (plane object properties + doc.Comment) by
-    site_builder.py, and into the README.
+    site_builder.py, and into the README. A short credit line is also
+    stamped into the bottom-left corner of the stitched image itself, so
+    the credit stays visible in the 3D view and in any screenshot.
 
 Scale/placement model: the stitched mosaic is cropped to the exact pixel
 bounds of the requested bbox, so the finished image spans a known lat/lon
@@ -66,6 +71,17 @@ IMAGERY_USER_AGENT = (
 )
 
 PROVIDERS = {
+    "osm_standard": {
+        "label": "Map (OpenStreetMap standard tiles)",
+        "url_template": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "max_zoom": 19,
+        "attribution": (
+            "(c) OpenStreetMap contributors; map data ODbL 1.0, "
+            "tile cartography CC BY-SA 2.0."
+        ),
+        "credit": "(c) OpenStreetMap contributors",
+        "terms_url": "https://operations.osmfoundation.org/policies/tiles/",
+    },
     "esri_world_imagery": {
         "label": "Satellite (Esri World Imagery)",
         "url_template": (
@@ -79,20 +95,11 @@ PROVIDERS = {
         "attribution": (
             "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community."
         ),
+        "credit": "Source: Esri, Vantor, Earthstar Geographics",
         "terms_url": "https://goto.arcgisonline.com/maps/World_Imagery",
     },
-    "osm_standard": {
-        "label": "Map (OpenStreetMap standard tiles)",
-        "url_template": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        "max_zoom": 19,
-        "attribution": (
-            "(c) OpenStreetMap contributors; map data ODbL 1.0, "
-            "tile cartography CC BY-SA 2.0."
-        ),
-        "terms_url": "https://operations.osmfoundation.org/policies/tiles/",
-    },
 }
-DEFAULT_PROVIDER = "esri_world_imagery"
+DEFAULT_PROVIDER = "osm_standard"
 
 
 class ImageryError(RuntimeError):
@@ -132,14 +139,21 @@ def meters_per_pixel(lat, zoom):
 
 def bbox_to_tile_range(s, w, n, e, zoom):
     """Inclusive integer tile range (x0, y0, x1, y1) covering the bbox at
-    the given zoom. y0 is the northern row."""
+    the given zoom. y0 is the northern row. Rows are clamped to the valid
+    [0, 2^zoom - 1] band: a bbox edge exactly at the Mercator latitude
+    limit lands on fractional row 2^zoom, whose floor would be a row of
+    tiles that does not exist (every request 404s -> an all-gray strip).
+    Columns are NOT clamped -- a bbox crossing the antimeridian legitimately
+    spans x >= 2^zoom, and fetch_mosaic() wraps x modulo 2^zoom per
+    request."""
+    n_tiles = 2 ** int(zoom)
     fx0, fy0 = latlon_to_tile_xy(n, w, zoom)  # NW corner: min x, min y
     fx1, fy1 = latlon_to_tile_xy(s, e, zoom)  # SE corner: max x, max y
     return (
         int(math.floor(fx0)),
-        int(math.floor(fy0)),
+        max(0, min(n_tiles - 1, int(math.floor(fy0)))),
         int(math.floor(fx1)),
-        int(math.floor(fy1)),
+        max(0, min(n_tiles - 1, int(math.floor(fy1)))),
     )
 
 
@@ -302,6 +316,28 @@ def _stitch_and_crop(tile_images, tile_range, crop):
     return mosaic.crop(crop)
 
 
+def stamp_credit(img, text):
+    """Draw the provider credit into the bottom-left corner of the image,
+    white text on a dark band, so the credit stays visible in the 3D view
+    and in screenshots (both providers' terms ask for visible attribution).
+    Overlays pixels in place; the image size is untouched, so the pixel
+    geometry the ImagePlane is scaled from stays exact. Pillow's built-in
+    bitmap font is used: no font files, works everywhere PIL does."""
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    left, top, right, bottom = draw.textbbox((0, 0), text)
+    pad = 3
+    band_h = (bottom - top) + 2 * pad
+    band_w = (right - left) + 2 * pad
+    y0 = max(0, img.height - band_h)
+    draw.rectangle(
+        (0, y0, min(img.width, band_w), img.height), fill=(0, 0, 0, 160)
+    )
+    draw.text((pad, y0 + pad - top), text, fill=(255, 255, 255, 255))
+    return img
+
+
 def fetch_mosaic(
     provider_key,
     s,
@@ -341,6 +377,7 @@ def fetch_mosaic(
     if os.path.exists(cache_path):
         if progress_cb:
             progress_cb(f"using cached imagery: {cache_path}")
+        out_path = cache_path
         tiles_fetched = 0
         tiles_failed = 0
         cached = True
@@ -369,7 +406,9 @@ def fetch_mosaic(
                 elapsed = time.time() - last_call
                 if last_call and elapsed < TILE_REQUEST_GAP_S:
                     time.sleep(TILE_REQUEST_GAP_S - elapsed)
-                raw = fetch_fn(provider, zoom, tx, ty)
+                # Wrap x for bboxes crossing the antimeridian: column
+                # 2^zoom is column 0 one world further east.
+                raw = fetch_fn(provider, zoom, tx % (2 ** zoom), ty)
                 last_call = time.time()
                 if raw is None:
                     tiles_failed += 1
@@ -379,17 +418,34 @@ def fetch_mosaic(
                 except Exception:  # noqa: BLE001 - undecodable tile -> placeholder
                     tiles_failed += 1
         tiles_fetched = total - tiles_failed
+        if tiles_fetched == 0:
+            raise ImageryError(
+                f"no imagery tiles could be fetched from "
+                f"{provider['label']} ({total} attempted); offline or "
+                "provider unavailable -- nothing was cached, try again later"
+            )
         cropped = _stitch_and_crop(tile_images, tile_range, crop)
+        stamp_credit(cropped, provider.get("credit", provider["attribution"]))
         os.makedirs(cache_dir, exist_ok=True)
-        cropped.save(cache_path, format="PNG")
+        # A mosaic with missing (gray) tiles must NOT land in the cache:
+        # the cache is keyed only by bbox, so a transient failure would be
+        # frozen in forever ("cached=True, 0 requests" on every later
+        # import). Save partial results under a deterministic side path
+        # instead, so the next import retries the network.
+        if tiles_failed:
+            out_path = cache_path[:-4] + "_partial.png"
+        else:
+            out_path = cache_path
+        cropped.save(out_path, format="PNG")
         cached = False
         if progress_cb and tiles_failed:
             progress_cb(
-                f"{tiles_failed} tile(s) unavailable at z{zoom}; shown as gray"
+                f"{tiles_failed} tile(s) unavailable at z{zoom}; shown as "
+                "gray (result not cached; a later import will retry)"
             )
 
     return {
-        "image_path": cache_path,
+        "image_path": out_path,
         "bounds_latlon": bounds,
         "provider_key": provider_key,
         "provider_label": provider["label"],

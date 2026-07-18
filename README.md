@@ -64,10 +64,11 @@ any Index submission.
      public geocoder), with a results list to pick the right match.
    - A **preset dropdown** with 3 example locations (see below).
    - An **Output** choice (new in v0.3):
-     - **2D map (satellite)**: the default. A flat plane with real
-       imagery. The **Imagery source** dropdown picks the tile provider:
-       Esri World Imagery (satellite/aerial, default) or OpenStreetMap
-       standard tiles (plain map).
+     - **2D map**: the default. A flat plane with real map imagery. The
+       **Imagery source** dropdown picks the tile provider: OpenStreetMap
+       standard tiles (plain map, the default) or Esri World Imagery
+       (satellite/aerial, opt-in; see "Data sources" below for why it is
+       not the default).
      - **3D site (buildings + terrain)**: the v0.2 behavior, unchanged.
      - **Include 3D buildings** checkbox: off by default in 2D map mode;
        tick it to extrude OSM buildings on top of the map. In 3D site
@@ -171,7 +172,16 @@ search "SiteContext" after it's indexed.
   the 225-point sample grid into ≤100-point requests with a sleep between
   them.
 - **Imagery (2D map mode)**: two selectable providers.
-  - **Esri World Imagery** (default), satellite/aerial tiles from the
+  - **OpenStreetMap standard tiles** (`tile.openstreetmap.org`), the
+    default, per the
+    [tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
+    a descriptive User-Agent is required, heavy use and bulk downloading
+    are not allowed, and caching is expected. This addon fetches at most
+    16 tiles per explicit Fetch & Build click, spaces requests out, and
+    caches the stitched result on disk. Map data ODbL 1.0, tile
+    cartography CC BY-SA 2.0. OSM is the default because its policy
+    explicitly allows exactly this kind of light, cached, attributed use.
+  - **Esri World Imagery** (opt-in), satellite/aerial tiles from the
     public `server.arcgisonline.com` map service. No API key. The
     attribution string is the service's own `copyrightText` (checked
     against the REST metadata 2026-07): "Source: Esri, Vantor, Earthstar
@@ -180,19 +190,18 @@ search "SiteContext" after it's indexed.
     ([goto.arcgisonline.com/maps/World_Imagery](https://goto.arcgisonline.com/maps/World_Imagery));
     they require this attribution wherever the imagery is shown, which is
     why it travels into the document properties and Comment. The zoom is
-    capped at 18, the highest with near-worldwide coverage.
-  - **OpenStreetMap standard tiles** (`tile.openstreetmap.org`), per the
-    [tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
-    a descriptive User-Agent is required, heavy use and bulk downloading
-    are not allowed, and caching is expected. This addon fetches at most
-    16 tiles per explicit Fetch & Build click, spaces requests out, and
-    caches the stitched result on disk. Map data ODbL 1.0, tile
-    cartography CC BY-SA 2.0.
+    capped at 18, the highest with near-worldwide coverage. It is opt-in
+    rather than the default because the tiles are served publicly but
+    Esri's terms are written around ArcGIS products, so use from a
+    third-party app is a gray area; pick it knowingly.
   - Both providers are served as ordinary Web-Mercator tiles
     (`{z}/{x}/{y}`, 256px). The shared discipline lives in `imagery.py`:
     descriptive User-Agent, hard 16-tile cap per import, one stitched
-    image per area, attribution written into the document. No bulk
-    downloading; larger areas simply get a coarser zoom.
+    image per area, attribution written into the document. The provider's
+    credit line is also stamped into the bottom-left corner of the
+    stitched image itself, so it stays visible in the 3D view and in
+    screenshots. No bulk downloading; larger areas simply get a coarser
+    zoom.
 - No API keys, no accounts, no telemetry. The only outbound network calls
   this addon ever makes are the ones above, and only when the user clicks
   Search or Fetch & Build, never at import/startup time.
@@ -293,13 +302,16 @@ anywhere.
 ## Verification
 
 `verify/headless_regression.py` runs under `freecadcmd` (no GUI, no
-network) and currently reports **16/16 checks pass** (FreeCAD 1.1.1,
-Python 3.11.14, Windows): tile math against known slippy-map values,
-stitch pixel geometry against a synthetic 2x2 tile set, ImagePlane scale
-against the projection, dialog-choice persistence in FreeCAD parameters,
-the buildings checkbox honored with a mocked Overpass client, attribution
-strings, and the legacy 3D build path unchanged. `EXPECTED_CHECKS` is
-pinned so silently dropped checks fail the run.
+network) and currently reports **19/19 checks pass**: tile math against
+known slippy-map values, stitch pixel geometry against a synthetic 2x2
+tile set, ImagePlane scale against the projection, dialog-choice
+persistence in FreeCAD parameters, the buildings checkbox honored with a
+mocked Overpass client, attribution strings, the legacy 3D build path
+unchanged, the imagery failure paths (failed tiles never poison the
+disk cache; tile requests stay in range at the antimeridian and the
+Mercator latitude limit), and the provider policy (OSM is the default,
+the credit line is stamped into the stitched image). `EXPECTED_CHECKS`
+is pinned so silently dropped checks fail the run.
 
 `verify/live_imagery_smoke.py` is the manual, network-using counterpart:
 one small real fetch (9 tiles around Trafalgar Square), stitched, placed,

@@ -158,7 +158,7 @@ class AddLocationDialog(QtWidgets.QDialog):
         output_box = QtWidgets.QGroupBox("Output")
         output_layout = QtWidgets.QVBoxLayout(output_box)
         mode_row = QtWidgets.QHBoxLayout()
-        self.mode_map_radio = QtWidgets.QRadioButton("2D map (satellite)")
+        self.mode_map_radio = QtWidgets.QRadioButton("2D map")
         self.mode_site_radio = QtWidgets.QRadioButton("3D site (buildings + terrain)")
         self.mode_map_radio.setChecked(True)
         self.mode_map_radio.toggled.connect(self._on_mode_changed)

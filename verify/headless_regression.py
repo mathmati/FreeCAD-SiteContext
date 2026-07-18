@@ -5,12 +5,12 @@ Run from the repo root with the wrapper in the README (or plainly):
 
     freecadcmd verify/headless_regression.py
 
-Exit code 0 and a final "16/16 checks pass" line when green. NO network
+Exit code 0 and a final "19/19 checks pass" line when green. NO network
 access: every fetch is either pure tile math, local synthetic images, or a
 mocked client. The live network path is covered separately by
 verify/live_imagery_smoke.py (manual).
 
-The 16 checks, in order:
+The 19 checks, in order:
 
    tile math       1-5    slippy-map tile coords, round-trip, bbox coverage,
                           zoom cap, meters-per-pixel
@@ -22,6 +22,12 @@ The 16 checks, in order:
                           mocked Overpass (not called, no buildings); 2D map
                           + buildings (mock called, buildings on the map)
    dialog module   16     add_location_dialog imports headless
+   fetch failures  17-18  failed tiles never poison the disk cache (offline
+                          raises, partial saved aside + retried); tile
+                          requests stay in range at the antimeridian and
+                          the Mercator latitude limit
+   provider policy 19     OSM is the default provider and the credit line
+                          is stamped into the stitched image
 """
 import math
 import os
@@ -60,7 +66,7 @@ from freecad.SiteContextWB.projection import (  # noqa: E402
     project_latlon,
 )
 
-EXPECTED_CHECKS = 16
+EXPECTED_CHECKS = 19
 
 _checks = []
 
@@ -502,6 +508,19 @@ def c15(fx):
         overpass_client.fetch_overpass_bbox = real_fetch
 
 
+def _solid_tile_png(rgb=(40, 90, 40)):
+    """A valid 256x256 PNG byte string standing in for one fetched tile."""
+    import io
+
+    from PIL import Image as PILImage
+
+    buf = io.BytesIO()
+    PILImage.new("RGB", (imagery.TILE_SIZE, imagery.TILE_SIZE), rgb).save(
+        buf, format="PNG"
+    )
+    return buf.getvalue()
+
+
 # --- 16: dialog module ----------------------------------------------------------
 @check("dialog: add_location_dialog imports headless (syntax/wiring smoke)")
 def c16(fx):
@@ -510,6 +529,137 @@ def c16(fx):
     ok(hasattr(dlg, "AddLocationDialog"), "dialog class missing")
     ok("Esri" in dlg.ATTRIBUTION_FOOTER, "imagery attribution missing from footer")
     ok("16 tiles" in dlg.ATTRIBUTION_FOOTER, "tile cap missing from footer")
+
+
+# --- 17-18: fetch failure paths / tile index sanity ---------------------------
+@check("imagery: failed tiles never poison the disk cache")
+def c17(fx):
+    s, w, n, e = fx.bbox
+    cache_dir = os.path.join(fx.tmp, "cache17")
+    os.makedirs(cache_dir, exist_ok=True)
+    good_png = _solid_tile_png()
+
+    # All tiles fail (offline): ImageryError, and nothing lands in the cache.
+    try:
+        imagery.fetch_mosaic(
+            "esri_world_imagery", s, w, n, e,
+            cache_dir=cache_dir, fetch_fn=lambda *a: None,
+        )
+    except imagery.ImageryError:
+        pass
+    else:
+        raise AssertionError("all-tiles-failed fetch did not raise ImageryError")
+    ok(os.listdir(cache_dir) == [],
+       "offline failure left cache files: %r" % os.listdir(cache_dir))
+
+    # One tile fails: result is served from a side path, not the cache key.
+    fail_once = [True]
+
+    def flaky(provider, zoom, x, y):
+        if fail_once and fail_once.pop():
+            return None
+        return good_png
+
+    res = imagery.fetch_mosaic(
+        "esri_world_imagery", s, w, n, e, cache_dir=cache_dir, fetch_fn=flaky
+    )
+    ok(res["tiles_failed"] == 1 and not res["cached"],
+       "flaky fetch stats wrong: %r" % res)
+    ok(res["image_path"].endswith("_partial.png"),
+       "partial mosaic stored under the cache key: %r" % res["image_path"])
+    ok(os.path.isfile(res["image_path"]), "partial mosaic file missing")
+
+    # Next import retries the network (the partial file is not a cache hit),
+    # and a fully successful fetch is then cached for real.
+    calls = []
+
+    def counting(provider, zoom, x, y):
+        calls.append((x, y))
+        return good_png
+
+    res2 = imagery.fetch_mosaic(
+        "esri_world_imagery", s, w, n, e, cache_dir=cache_dir, fetch_fn=counting
+    )
+    ok(calls, "retry after a partial fetch never hit the network")
+    ok(not res2["cached"] and res2["tiles_failed"] == 0,
+       "clean retry stats wrong: %r" % res2)
+    calls2 = []
+
+    def counting2(provider, zoom, x, y):
+        calls2.append((x, y))
+        return good_png
+
+    res3 = imagery.fetch_mosaic(
+        "esri_world_imagery", s, w, n, e, cache_dir=cache_dir, fetch_fn=counting2
+    )
+    ok(res3["cached"] and not calls2, "complete fetch was not cached")
+
+
+@check("imagery: antimeridian x wraps, Mercator-edge rows stay in range")
+def c18(fx):
+    # Taveuni, Fiji: a 300m-radius bbox crossing longitude 180. The raw
+    # tile range runs past column 2^zoom - 1; every actual request must
+    # arrive wrapped into [0, 2^zoom - 1].
+    s, w, n, e = bbox_from_center_radius(-16.8, 179.999, 300)
+    zoom, rng = imagery.choose_tile_range(s, w, n, e, max_zoom=18)
+    n_tiles = 2 ** zoom
+    ok(rng[2] >= n_tiles, "fixture no longer crosses the antimeridian: %r" % (rng,))
+    requested = []
+    cache_dir = os.path.join(fx.tmp, "cache18")
+    os.makedirs(cache_dir, exist_ok=True)
+    png = _solid_tile_png()
+
+    def spy(provider, z, x, y):
+        requested.append((x, y))
+        return png
+
+    res = imagery.fetch_mosaic(
+        "osm_standard", s, w, n, e, cache_dir=cache_dir, fetch_fn=spy
+    )
+    ok(res["tiles_failed"] == 0, "spy fetch reported failures: %r" % res)
+    ok(all(0 <= x < 2 ** res["zoom"] for x, _y in requested),
+       "out-of-range tile x requested: %r" % (requested,))
+    ok(all(0 <= y < 2 ** res["zoom"] for _x, y in requested),
+       "out-of-range tile y requested: %r" % (requested,))
+
+    # A bbox edge past the Mercator latitude limit clamps to the last real
+    # row instead of asking for row 2^zoom (which does not exist).
+    s2, w2, n2, e2 = bbox_from_center_radius(-85.06, 0.0, 300)
+    x0, y0, x1, y1 = imagery.bbox_to_tile_range(s2, w2, n2, e2, 16)
+    ok(0 <= y0 <= y1 <= 2 ** 16 - 1,
+       "Mercator-edge rows out of range: %r" % ((x0, y0, x1, y1),))
+
+
+@check("imagery: default is OSM and the credit is stamped into the image")
+def c19(fx):
+    ok(imagery.DEFAULT_PROVIDER == "osm_standard",
+       "default provider is %r, expected osm_standard"
+       % imagery.DEFAULT_PROVIDER)
+    ok(all("credit" in p for p in imagery.PROVIDERS.values()),
+       "a provider is missing its short credit string")
+
+    from PIL import Image as PILImage
+
+    s, w, n, e = fx.bbox
+    cache_dir = os.path.join(fx.tmp, "cache19")
+    os.makedirs(cache_dir, exist_ok=True)
+    png = _solid_tile_png()
+    res = imagery.fetch_mosaic(
+        "osm_standard", s, w, n, e, cache_dir=cache_dir,
+        fetch_fn=lambda *a: png,
+    )
+    img = PILImage.open(res["image_path"]).convert("RGB")
+    # The source tiles are one solid color, so any extra colors in the
+    # bottom-left corner are the stamped credit band and text.
+    corner = img.crop((0, max(0, img.height - 16), min(img.width, 220),
+                       img.height))
+    colors = corner.getcolors(maxcolors=4096) or []
+    ok(len(colors) > 1,
+       "bottom-left corner is still a solid color: no credit stamped")
+    # The rest of the image is untouched: the top row is pure tile color.
+    top = img.crop((0, 0, img.width, 1))
+    ok(len(top.getcolors(maxcolors=4096) or []) == 1,
+       "stamp leaked outside the bottom band")
 
 
 def main():
