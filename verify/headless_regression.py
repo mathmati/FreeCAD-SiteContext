@@ -540,5 +540,11 @@ def main():
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+# Not guarded by __name__ == "__main__": stock freecadcmd (for example the
+# conda-forge 1.1.0 build) does not set __name__ that way, so a guarded
+# harness silently runs zero checks and still exits 0. Run unconditionally;
+# os._exit propagates the code without tripping freecadcmd's SystemExit
+# handling, and the flush beats freecadcmd's buffered stdout.
+rc = main()
+sys.stdout.flush()
+os._exit(rc)

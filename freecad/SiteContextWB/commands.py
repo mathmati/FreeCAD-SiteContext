@@ -17,7 +17,7 @@ class AddLocationCommand(object):
 
     def GetResources(self):
         return {
-            "MenuText": "Add Location…",
+            "MenuText": "Add Location...",
             "ToolTip": (
                 "Fetch a 2D satellite/OSM map or a 3D site model "
                 "(OpenStreetMap buildings + terrain) around a place"
