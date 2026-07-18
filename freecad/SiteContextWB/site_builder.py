@@ -199,6 +199,9 @@ def build_site(
     elevation_sample_points=None,
     progress_cb=None,
     progress_every=15,
+    include_buildings=True,
+    imagery=None,
+    ground_plane=True,
 ):
     """Build a FreeCAD document from fetched OSM data (+ optional elevation
     grid) for one Add-Location request. Returns (doc, stats).
@@ -208,6 +211,16 @@ def build_site(
     caller can pump QApplication.processEvents() and update a "building
     N/M" label without moving this FreeCAD-API-heavy work off the main
     thread (unsafe -- see module docstring).
+
+    include_buildings=False skips the whole Overpass way/relation loop
+    (2D map mode with the buildings checkbox off); counts stay zero and no
+    bldg_* objects are created even if osm_data carries elements.
+
+    imagery, when given, is an imagery.fetch_mosaic() result dict; the
+    stitched image is placed as a flat Image::ImagePlane sized to its exact
+    lat/lon bounds. ground_plane=False suppresses the flat ground box (2D
+    map mode, where the imagery plane is the base). Defaults reproduce the
+    v0.2 3D-site behavior exactly.
     """
     s, w, n, e = bbox
     lat0 = (s + n) / 2.0
@@ -217,15 +230,19 @@ def build_site(
     group = doc.addObject("App::DocumentObjectGroup", "SiteContext")
     group.Label = "SiteContext"
 
-    elements = osm_data.get("elements", [])
-    ways = [
-        el for el in elements if el.get("type") == "way" and "building" in el.get("tags", {})
-    ]
-    relations = [
-        el
-        for el in elements
-        if el.get("type") == "relation" and "building" in el.get("tags", {})
-    ]
+    if include_buildings:
+        elements = osm_data.get("elements", [])
+        ways = [
+            el for el in elements if el.get("type") == "way" and "building" in el.get("tags", {})
+        ]
+        relations = [
+            el
+            for el in elements
+            if el.get("type") == "relation" and "building" in el.get("tags", {})
+        ]
+    else:
+        ways = []
+        relations = []
 
     total = len(ways) + len(relations)
     fetched = len(ways)
@@ -324,7 +341,7 @@ def build_site(
                 "flat ground plane used."
             )
 
-    if not terrain_stats["used"]:
+    if not terrain_stats["used"] and ground_plane:
         ground = doc.addObject("Part::Box", "GroundPlane")
         ground.Length = ground_w_mm
         ground.Width = ground_d_mm
@@ -339,12 +356,27 @@ def build_site(
         if elevation_grid is None:
             terrain_stats["reason"] = "no elevation data requested/available; flat ground plane used."
 
-    # --- Georeference (document + group properties) -----------------------
-    _add_georef_properties(group, lat0, lon0, bbox)
+    # --- Imagery plane (2D map mode) ----------------------------------------
+    imagery_stats = None
+    if imagery is not None:
+        imagery_stats = _add_imagery_plane(doc, group, FreeCAD, imagery, lat0, lon0)
 
-    attribution_lines = [OSM_ATTRIBUTION]
+    # --- Georeference (document + group properties) -----------------------
+    _add_georef_properties(
+        group, lat0, lon0, bbox,
+        include_buildings=include_buildings,
+        imagery_attribution=(
+            imagery["attribution"] if imagery_stats is not None else None
+        ),
+    )
+
+    attribution_lines = []
+    if include_buildings:
+        attribution_lines.append(OSM_ATTRIBUTION)
     if elevation_grid is not None:
         attribution_lines.append(ELEVATION_ATTRIBUTION)
+    if imagery_stats is not None:
+        attribution_lines.append(imagery["attribution"])
     doc.Comment = (
         f"SiteContext -- {label}\n"
         f"bbox (S,W,N,E) = ({s},{w},{n},{e})\n"
@@ -353,6 +385,7 @@ def build_site(
     )
 
     doc.recompute()
+    _force_gui_visibility(FreeCAD, group)
 
     stats = {
         "label": label,
@@ -367,11 +400,80 @@ def build_site(
         "ground_w_m": ground_w_mm / 1000.0,
         "ground_d_m": ground_d_mm / 1000.0,
         "terrain": terrain_stats,
+        "include_buildings": include_buildings,
+        "imagery": imagery_stats,
     }
     return doc, stats
 
 
-def _add_georef_properties(group, lat0, lon0, bbox):
+def _force_gui_visibility(FreeCAD, group):
+    """Force the GUI visibility flags for the group and all its members.
+
+    Setting App-side ``Visibility`` does not drive the GUI view provider:
+    a document built or saved in a console session can load with every
+    object hidden (observed 2026-07-18: a freecadcmd-saved smoke document
+    opened in the GUI with both the group and the imagery plane at
+    ViewObject.Visibility == False). When the GUI is up, set the view flags
+    explicitly. A no-op under freecadcmd (``App.GuiUp`` is False there).
+    """
+    if not getattr(FreeCAD, "GuiUp", False):
+        return
+    for obj in [group] + list(getattr(group, "Group", [])):
+        vo = getattr(obj, "ViewObject", None)
+        if vo is not None:
+            vo.Visibility = True
+
+
+def _add_imagery_plane(doc, group, FreeCAD, imagery, lat0, lon0):
+    """Place the stitched map/satellite image as a flat Image::ImagePlane
+    sized to its exact lat/lon bounds (imagery.fetch_mosaic() result dict).
+    The quad is centered on Placement.Base and displays north-up -- see
+    imagery.py's module docstring for the verified ImagePlane contract.
+    Returns the stats dict recorded in stats["imagery"]."""
+    from .imagery import plane_metrics
+
+    try:
+        import Image  # noqa: F401 - registers the Image::ImagePlane type
+    except Exception:  # noqa: BLE001 - already registered, or GUI-side
+        pass
+
+    x_size, y_size, cx, cy, z = plane_metrics(imagery["bounds_latlon"], lat0, lon0)
+    plane = doc.addObject("Image::ImagePlane", "SiteImagery")
+    plane.Label = "Imagery ({}, z{})".format(imagery["provider_label"], imagery["zoom"])
+    plane.ImageFile = imagery["image_path"]
+    plane.XSize = x_size
+    plane.YSize = y_size
+    plane.Placement.Base = FreeCAD.Vector(cx, cy, z)
+    plane.Visibility = True
+    plane.addProperty(
+        "App::PropertyString", "Attribution", "SiteContext Imagery",
+        "Imagery attribution (provider terms require it)",
+    )
+    plane.Attribution = imagery["attribution"]
+    plane.addProperty(
+        "App::PropertyString", "Provider", "SiteContext Imagery",
+        "Imagery provider and zoom",
+    )
+    plane.Provider = "{} zoom {}".format(imagery["provider_key"], imagery["zoom"])
+    group.addObject(plane)
+
+    return {
+        "provider_key": imagery["provider_key"],
+        "provider_label": imagery["provider_label"],
+        "zoom": imagery["zoom"],
+        "tiles_fetched": imagery["tiles_fetched"],
+        "tiles_failed": imagery["tiles_failed"],
+        "cached": imagery["cached"],
+        "image_path": imagery["image_path"],
+        "width_px": imagery["width_px"],
+        "height_px": imagery["height_px"],
+        "width_m": x_size / 1000.0,
+        "height_m": y_size / 1000.0,
+        "attribution": imagery["attribution"],
+    }
+
+
+def _add_georef_properties(group, lat0, lon0, bbox, include_buildings=True, imagery_attribution=None):
     """Store the geo origin as document(-group) properties so the site is
     georeferenced-in-spirit, per the task brief: local origin lat/lon, the
     equirectangular-approximation caveat, and that meters are exact at the
@@ -382,7 +484,6 @@ def _add_georef_properties(group, lat0, lon0, bbox):
         ("App::PropertyFloat", "OriginLatitude", lat0, "Latitude of the local projection origin (deg, WGS84)"),
         ("App::PropertyFloat", "OriginLongitude", lon0, "Longitude of the local projection origin (deg, WGS84)"),
         ("App::PropertyString", "ProjectionNote", PROJECTION_NOTE, "Projection accuracy caveat"),
-        ("App::PropertyString", "Attribution", OSM_ATTRIBUTION, "Data attribution (ODbL)"),
         (
             "App::PropertyString",
             "SourceBBox",
@@ -390,6 +491,15 @@ def _add_georef_properties(group, lat0, lon0, bbox):
             "Source Overpass bbox (WGS84 degrees)",
         ),
     ]
+    if include_buildings:
+        props.append(
+            ("App::PropertyString", "Attribution", OSM_ATTRIBUTION, "Data attribution (ODbL)")
+        )
+    if imagery_attribution:
+        props.append(
+            ("App::PropertyString", "ImageryAttribution", imagery_attribution,
+             "Imagery attribution (provider terms require it)")
+        )
     for prop_type, name, value, doc_str in props:
         if name not in group.PropertiesList:
             group.addProperty(prop_type, name, "SiteContext Georeference", doc_str)

@@ -22,7 +22,7 @@ import urllib.request
 from .projection import project_latlon
 
 OPENTOPODATA_URL = "https://api.opentopodata.org/v1/srtm90m"
-OPENTOPODATA_USER_AGENT = "FreeCAD-SiteContext-addon/0.2 (+https://github.com/mathmati)"
+OPENTOPODATA_USER_AGENT = "FreeCAD-SiteContext-addon/0.3 (+https://github.com/mathmati)"
 BATCH_SIZE = 100
 MIN_REQUEST_INTERVAL_S = 1.0
 RELIEF_THRESHOLD_M = 2.0

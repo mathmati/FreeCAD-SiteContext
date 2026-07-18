@@ -1,0 +1,19 @@
+[ ok   1] tile math: latlon_to_tile_xy hits known slippy-map values
+[ ok   2] tile math: tile_xy_to_latlon is the exact inverse (world corners)
+[ ok   3] tile math: bbox_to_tile_range fully covers the bbox
+[ ok   4] tile math: choose_tile_range never exceeds the 16-tile cap
+[ ok   5] tile math: meters_per_pixel matches the Web-Mercator constants
+[ ok   6] stitch: mosaic/crop pixel geometry is consistent with the bbox
+[ ok   7] stitch: synthetic 2x2 tiles land in the right pixels (PIL)
+[ ok   8] plane: plane_metrics matches the equirectangular projection
+[ ok   9] plane: pixel scale and plane size agree within 1% (Mercator vs equirect)
+[ ok  10] settings: dialog choices round-trip through FreeCAD parameters
+[ ok  11] settings: fetch_plan honors the buildings checkbox and the mode
+[ ok  12] attribution: provider credit, zoom, and tile count in the string
+[ ok  13] build: legacy 3D site call is unchanged (building + ground + georef)
+[ ok  14] build: 2D map without the checkbox - Overpass not called, no buildings
+[ ok  15] build: 2D map with the checkbox - Overpass called, buildings on the map
+[ ok  16] dialog: add_location_dialog imports headless (syntax/wiring smoke)
+----------------------------------------------------------------
+16/16 checks pass
+SYSTEM_EXIT code=0

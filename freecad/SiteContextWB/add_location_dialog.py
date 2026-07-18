@@ -19,7 +19,7 @@ import FreeCAD as App
 import FreeCADGui as Gui
 from PySide import QtCore, QtWidgets
 
-from . import geocode, overpass_client, presets, site_builder, terrain
+from . import geocode, imagery, overpass_client, presets, settings, site_builder, terrain
 from .projection import bbox_from_center_radius
 
 MIN_RADIUS_M = 100
@@ -30,7 +30,11 @@ ATTRIBUTION_FOOTER = (
     "Buildings: © OpenStreetMap contributors, ODbL 1.0 "
     "(openstreetmap.org/copyright). Search: Nominatim, usage policy at "
     "operations.osmfoundation.org/policies/nominatim. Terrain: SRTM 90m via "
-    "the public api.opentopodata.org service. Please be a polite API "
+    "the public api.opentopodata.org service. Imagery (2D map): Esri World "
+    "Imagery (Source: Esri, Vantor, Earthstar Geographics, and the GIS User "
+    "Community) or OSM standard tiles (cartography CC BY-SA 2.0); at most "
+    f"{imagery.MAX_TILES_PER_IMPORT} tiles per import, cached locally. "
+    "Please be a polite API "
     "citizen -- this dialog throttles and caches requests for you."
 )
 
@@ -43,35 +47,58 @@ def _cache_dir():
 
 
 class FetchWorker(QtCore.QThread):
-    """Runs Overpass + (optionally) opentopodata network calls off the GUI
-    thread. Emits progress strings, then either finished_ok(dict) or
-    failed(str). Does no FreeCAD-API work -- safe to run in a real thread.
+    """Runs the network calls for one Fetch & Build click off the GUI
+    thread: imagery tiles, Overpass buildings and opentopodata elevation,
+    each only if the fetch plan (settings.fetch_plan) asks for it. Emits
+    progress strings, then either finished_ok(dict) or failed(str). Does
+    no FreeCAD-API work -- safe to run in a real thread. The PIL stitch in
+    imagery.fetch_mosaic() is pure image work, no FreeCAD API, so it can
+    happen here too.
     """
 
     progress = QtCore.Signal(str)
     finished_ok = QtCore.Signal(dict)
     failed = QtCore.Signal(str)
 
-    def __init__(self, bbox, label, want_terrain, parent=None):
+    def __init__(self, bbox, label, plan, provider_key, parent=None):
         super(FetchWorker, self).__init__(parent)
         self.bbox = bbox
         self.label = label
-        self.want_terrain = want_terrain
+        self.plan = plan
+        self.provider_key = provider_key
 
     def run(self):
         try:
             s, w, n, e = self.bbox
-            slug = "adhoc_{:.5f}_{:.5f}_{:.5f}_{:.5f}".format(s, w, n, e)
-            cache_path = os.path.join(_cache_dir(), slug + ".json")
+            result = {"plan": self.plan, "provider_key": self.provider_key}
 
-            self.progress.emit("fetching OSM buildings (ways + relations)...")
-            osm_data = overpass_client.fetch_overpass_bbox(
-                s, w, n, e, cache_path=cache_path, progress_cb=self.progress.emit
-            )
+            imagery_result = None
+            if self.plan.get("imagery"):
+                imagery_result = imagery.fetch_mosaic(
+                    self.provider_key,
+                    s, w, n, e,
+                    cache_dir=_cache_dir(),
+                    progress_cb=self.progress.emit,
+                )
+            result["imagery"] = imagery_result
+
+            if self.plan.get("buildings"):
+                slug = "adhoc_{:.5f}_{:.5f}_{:.5f}_{:.5f}".format(s, w, n, e)
+                cache_path = os.path.join(_cache_dir(), slug + ".json")
+                self.progress.emit("fetching OSM buildings (ways + relations)...")
+                osm_data = overpass_client.fetch_overpass_bbox(
+                    s, w, n, e, cache_path=cache_path, progress_cb=self.progress.emit
+                )
+            else:
+                self.progress.emit(
+                    "buildings not requested; skipping the Overpass fetch"
+                )
+                osm_data = {"elements": []}
+            result["osm_data"] = osm_data
 
             elevation_grid = None
             sample_points = None
-            if self.want_terrain:
+            if self.plan.get("terrain"):
                 try:
                     sample_points = terrain.sample_grid_points(s, w, n, e)
                     elevation_grid = terrain.fetch_elevation_grid(
@@ -82,14 +109,10 @@ class FetchWorker(QtCore.QThread):
                         f"terrain elevation unavailable ({exc}); "
                         "falling back to a flat ground plane"
                     )
+            result["elevation_grid"] = elevation_grid
+            result["sample_points"] = sample_points
 
-            self.finished_ok.emit(
-                {
-                    "osm_data": osm_data,
-                    "elevation_grid": elevation_grid,
-                    "sample_points": sample_points,
-                }
-            )
+            self.finished_ok.emit(result)
         except Exception as exc:  # noqa: BLE001 - surface any failure to the dialog
             self.failed.emit(f"{exc}\n{traceback.format_exc()}")
 
@@ -97,24 +120,27 @@ class FetchWorker(QtCore.QThread):
 class AddLocationDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(AddLocationDialog, self).__init__(parent)
-        self.setWindowTitle("Add Location... - SiteContext")
+        self.setWindowTitle("Add Location… — SiteContext")
         self.resize(520, 560)
 
         self._worker = None
         self._bbox = None
         self._label = None
+        self._map_buildings_choice = settings.DEFAULT_INCLUDE_BUILDINGS
         self.last_document = None
 
         self._build_ui()
+        self._load_settings()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
 
         intro = QtWidgets.QLabel(
-            "Fetch real-world OpenStreetMap building footprints (+ terrain) "
-            "around a location and build a 3D site model, grouped under "
-            "'SiteContext'."
+            "Fetch real-world context around a location: a flat 2D map "
+            "(satellite or OpenStreetMap tiles), a 3D site model (OSM "
+            "building footprints + terrain), or the map with 3D buildings "
+            "on top. Everything is grouped under “SiteContext”."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -128,6 +154,39 @@ class AddLocationDialog(QtWidgets.QDialog):
         self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
         preset_row.addWidget(self.preset_combo, 1)
         layout.addLayout(preset_row)
+
+        output_box = QtWidgets.QGroupBox("Output")
+        output_layout = QtWidgets.QVBoxLayout(output_box)
+        mode_row = QtWidgets.QHBoxLayout()
+        self.mode_map_radio = QtWidgets.QRadioButton("2D map (satellite)")
+        self.mode_site_radio = QtWidgets.QRadioButton("3D site (buildings + terrain)")
+        self.mode_map_radio.setChecked(True)
+        self.mode_map_radio.toggled.connect(self._on_mode_changed)
+        self.mode_site_radio.toggled.connect(self._on_mode_changed)
+        mode_row.addWidget(self.mode_map_radio)
+        mode_row.addWidget(self.mode_site_radio)
+        mode_row.addStretch(1)
+        output_layout.addLayout(mode_row)
+        opts_row = QtWidgets.QHBoxLayout()
+        opts_row.addWidget(QtWidgets.QLabel("Imagery source:"))
+        self.provider_combo = QtWidgets.QComboBox()
+        for key, provider in imagery.PROVIDERS.items():
+            self.provider_combo.addItem(provider["label"], key)
+        self.provider_combo.setToolTip(
+            "Tile source for the 2D map. At most "
+            f"{imagery.MAX_TILES_PER_IMPORT} tiles per import; the zoom is "
+            "chosen automatically to fit. Stitched images are cached locally."
+        )
+        opts_row.addWidget(self.provider_combo, 1)
+        self.buildings_checkbox = QtWidgets.QCheckBox("Include 3D buildings")
+        self.buildings_checkbox.setToolTip(
+            "Also fetch OpenStreetMap building footprints and extrude them "
+            "on top of the map."
+        )
+        self.buildings_checkbox.toggled.connect(self._on_buildings_toggled)
+        opts_row.addWidget(self.buildings_checkbox)
+        output_layout.addLayout(opts_row)
+        layout.addWidget(output_box)
 
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._build_coords_tab(), "Coordinates")
@@ -246,6 +305,38 @@ class AddLocationDialog(QtWidgets.QDialog):
         self.radius_spin.setValue(preset["radius_m"])
         self._log(f"Loaded preset: {preset['label']}")
 
+    # ------------------------------------------------------ output choice
+    def _current_mode(self):
+        if self.mode_map_radio.isChecked():
+            return settings.MODE_2D_MAP
+        return settings.MODE_3D_SITE
+
+    def _on_buildings_toggled(self, checked):
+        # Track the 2D-mode choice separately: in 3D site mode the checkbox
+        # is forced ticked+disabled (buildings are inherent there), so its
+        # visible state is not the user's 2D choice.
+        if self._current_mode() == settings.MODE_2D_MAP:
+            self._map_buildings_choice = checked
+
+    def _on_mode_changed(self):
+        is_map = self._current_mode() == settings.MODE_2D_MAP
+        self.provider_combo.setEnabled(is_map)
+        self.terrain_checkbox.setEnabled(not is_map)
+        self.buildings_checkbox.setEnabled(is_map)
+        # 3D site mode always includes buildings, as in v0.2; show the
+        # checkbox ticked-but-disabled so that stays visible.
+        self.buildings_checkbox.setChecked(True if not is_map else self._map_buildings_choice)
+
+    def _load_settings(self):
+        saved = settings.load_settings()
+        self._map_buildings_choice = saved["include_buildings"]
+        self.mode_map_radio.setChecked(saved["output_mode"] == settings.MODE_2D_MAP)
+        self.mode_site_radio.setChecked(saved["output_mode"] == settings.MODE_3D_SITE)
+        idx = self.provider_combo.findData(saved["imagery_provider"])
+        if idx >= 0:
+            self.provider_combo.setCurrentIndex(idx)
+        self._on_mode_changed()
+
     # ------------------------------------------------------------ geocode
     def _on_search_place(self):
         query = self.place_query.text().strip()
@@ -253,7 +344,7 @@ class AddLocationDialog(QtWidgets.QDialog):
             return
         self.search_button.setEnabled(False)
         self.results_list.clear()
-        self._log(f"Searching Nominatim for '{query}'...")
+        self._log(f"Searching Nominatim for “{query}”…")
         QtWidgets.QApplication.processEvents()
         try:
             results = geocode.geocode_search(query, limit=5)
@@ -304,6 +395,12 @@ class AddLocationDialog(QtWidgets.QDialog):
         self.tabs.setEnabled(not busy)
         self.radius_spin.setEnabled(not busy)
         self.terrain_checkbox.setEnabled(not busy)
+        self.mode_map_radio.setEnabled(not busy)
+        self.mode_site_radio.setEnabled(not busy)
+        self.provider_combo.setEnabled(not busy)
+        self.buildings_checkbox.setEnabled(not busy)
+        if not busy:
+            self._on_mode_changed()  # restore mode-dependent enable states
 
     def _on_fetch_and_build(self):
         try:
@@ -312,13 +409,20 @@ class AddLocationDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "SiteContext", str(exc))
             return
 
+        mode = self._current_mode()
+        provider_key = self.provider_combo.currentData()
+        plan = settings.fetch_plan(
+            mode, self._map_buildings_choice, self.terrain_checkbox.isChecked()
+        )
+        settings.save_settings(mode, self._map_buildings_choice, provider_key)
+
         self._bbox = bbox
         self._label = label
         self._set_busy(True)
         self.progress_bar.setRange(0, 0)  # indeterminate during fetch
         self._log(f"Starting fetch for {label} ...")
 
-        self._worker = FetchWorker(bbox, label, self.terrain_checkbox.isChecked(), self)
+        self._worker = FetchWorker(bbox, label, plan, provider_key, self)
         self._worker.progress.connect(self._log)
         self._worker.finished_ok.connect(self._on_fetch_finished)
         self._worker.failed.connect(self._on_fetch_failed)
@@ -335,7 +439,7 @@ class AddLocationDialog(QtWidgets.QDialog):
         if self.progress_bar.maximum() != total:
             self.progress_bar.setRange(0, max(total, 1))
         self.progress_bar.setValue(current)
-        self.status_label.setText(f"{phase} {current}/{total}...")
+        self.status_label.setText(f"{phase} {current}/{total}…")
         # Pump the event loop so the UI stays responsive while this
         # synchronous FreeCAD-API geometry loop runs on the main thread
         # (it cannot safely move to the background worker thread -- see
@@ -343,9 +447,10 @@ class AddLocationDialog(QtWidgets.QDialog):
         QtWidgets.QApplication.processEvents()
 
     def _on_fetch_finished(self, payload):
-        self._log("Fetch complete. Building geometry...")
+        self._log("Fetch complete. Building geometry…")
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
+        plan = payload.get("plan") or {"imagery": False, "buildings": True}
         try:
             import FreeCAD
             import Part
@@ -363,6 +468,9 @@ class AddLocationDialog(QtWidgets.QDialog):
                 elevation_grid=payload.get("elevation_grid"),
                 elevation_sample_points=payload.get("sample_points"),
                 progress_cb=self._on_build_progress,
+                include_buildings=plan["buildings"],
+                imagery=payload.get("imagery"),
+                ground_plane=not plan["imagery"],
             )
         except Exception as exc:  # noqa: BLE001
             self._on_fetch_failed(f"{exc}\n{traceback.format_exc()}")
@@ -374,6 +482,26 @@ class AddLocationDialog(QtWidgets.QDialog):
         _activate_document_view(doc)
 
     def _show_stats(self, stats):
+        if stats.get("imagery"):
+            im = stats["imagery"]
+            if im["cached"]:
+                tiles = "cached image, 0 requests"
+            else:
+                tiles = f"{im['tiles_fetched']} tiles"
+                if im["tiles_failed"]:
+                    tiles += f", {im['tiles_failed']} unavailable (gray)"
+            if stats["include_buildings"]:
+                bldg = f"{stats['built']} building(s) on top"
+            else:
+                bldg = 'buildings not included (tick "Include 3D buildings" to add them)'
+            summary = (
+                f"Done: 2D map {im['width_m']:.0f}m x {im['height_m']:.0f}m "
+                f"from {im['provider_label']} (z{im['zoom']}, {tiles}); {bldg}"
+            )
+            self._log(summary)
+            self.status_label.setText(summary)
+            return
+
         terrain_info = stats["terrain"]
         terrain_line = (
             f"terrain: {'MESH (relief ' + format(terrain_info['relief_m'], '.1f') + 'm)' if terrain_info['used'] else 'flat plane'}"

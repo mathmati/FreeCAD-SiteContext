@@ -20,7 +20,7 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 ]
-OVERPASS_USER_AGENT = "FreeCAD-SiteContext-addon/0.2 (+https://github.com/mathmati)"
+OVERPASS_USER_AGENT = "FreeCAD-SiteContext-addon/0.3 (+https://github.com/mathmati)"
 
 
 class OverpassError(RuntimeError):

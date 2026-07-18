@@ -1,0 +1,14 @@
+bbox (S,W,N,E) = (51.506802, -0.129543, 51.508598, -0.126657)
+provider       = Satellite (Esri World Imagery)
+  fetch: using cached imagery: C:\Users\matle\AppData\Roaming\FreeCAD\v1-1\SiteContextCache\imagery_esri_world_imagery_z18_51.50680_-0.12954_51.50860_-0.12666.png
+zoom           = 18 (auto, cap 16 tiles)
+tile range     = (130977, 87168, 130979, 87170) -> 9 tile(s), 0 failed, cached=True
+image          = 538 x 538 px -> C:\Users\matle\AppData\Roaming\FreeCAD\v1-1\SiteContextCache\imagery_esri_world_imagery_z18_51.50680_-0.12954_51.50860_-0.12666.png
+image bounds   = (51.506803, -0.129545, 51.508599, -0.126659)
+scale          = 0.3717 m/px at latitude 51.5077
+plane          = Image::ImagePlane, XSize 200.0 m x YSize 200.0 m, center (-159.5, 81.9, -10.0) mm
+plane image    = C:/Users/matle/AppData/Local/Temp//FreeCAD/v1-1/Cache/FreeCAD_Doc_97ccbf4b-fcf6-45dc-ac05-0119aae4795f_da39a3_509124/imagery_esri_world_imagery_z18_51.50680_-0.12954_51.50860_-0.12666.png
+attribution    = Imagery: Satellite (Esri World Imagery). Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community. Zoom 18, local cache, 0 network requests. Terms: https://goto.arcgisonline.com/maps/World_Imagery
+saved          = C:\Users\matle\OneDrive\Documents\Kimchi\build\FreeCAD-SiteContext\verify\out-smoke\SiteContext_Smoke_esri_world_imagery.FCStd
+SMOKE_OK
+SYSTEM_EXIT code=0
