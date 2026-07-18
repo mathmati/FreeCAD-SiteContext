@@ -97,7 +97,7 @@ class FetchWorker(QtCore.QThread):
 class AddLocationDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(AddLocationDialog, self).__init__(parent)
-        self.setWindowTitle("Add Location… — SiteContext")
+        self.setWindowTitle("Add Location... - SiteContext")
         self.resize(520, 560)
 
         self._worker = None
@@ -114,7 +114,7 @@ class AddLocationDialog(QtWidgets.QDialog):
         intro = QtWidgets.QLabel(
             "Fetch real-world OpenStreetMap building footprints (+ terrain) "
             "around a location and build a 3D site model, grouped under "
-            "“SiteContext”."
+            "'SiteContext'."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -253,7 +253,7 @@ class AddLocationDialog(QtWidgets.QDialog):
             return
         self.search_button.setEnabled(False)
         self.results_list.clear()
-        self._log(f"Searching Nominatim for “{query}”…")
+        self._log(f"Searching Nominatim for '{query}'...")
         QtWidgets.QApplication.processEvents()
         try:
             results = geocode.geocode_search(query, limit=5)
@@ -335,7 +335,7 @@ class AddLocationDialog(QtWidgets.QDialog):
         if self.progress_bar.maximum() != total:
             self.progress_bar.setRange(0, max(total, 1))
         self.progress_bar.setValue(current)
-        self.status_label.setText(f"{phase} {current}/{total}…")
+        self.status_label.setText(f"{phase} {current}/{total}...")
         # Pump the event loop so the UI stays responsive while this
         # synchronous FreeCAD-API geometry loop runs on the main thread
         # (it cannot safely move to the background worker thread -- see
@@ -343,7 +343,7 @@ class AddLocationDialog(QtWidgets.QDialog):
         QtWidgets.QApplication.processEvents()
 
     def _on_fetch_finished(self, payload):
-        self._log("Fetch complete. Building geometry…")
+        self._log("Fetch complete. Building geometry...")
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
         try:
