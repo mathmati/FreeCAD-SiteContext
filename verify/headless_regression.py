@@ -332,8 +332,11 @@ def c09(fx):
 @check("settings: dialog choices round-trip through FreeCAD parameters")
 def c10(fx):
     params = App.ParamGet(settings.PARAM_GROUP)
-    for rem in ("RemString", "RemBool"):
-        for key in ("OutputMode", "IncludeBuildings", "ImageryProvider"):
+    for rem, keys in (
+        ("RemString", ("OutputMode", "ImageryProvider")),
+        ("RemBool", ("IncludeBuildings", "ImageryProviderChosen")),
+    ):
+        for key in keys:
             try:
                 getattr(params, rem)(key)
             except Exception:  # noqa: BLE001 - key absent / wrong type
@@ -344,11 +347,20 @@ def c10(fx):
     ok(defaults["include_buildings"] is False, "first-run buildings default not off")
     ok(defaults["imagery_provider"] == imagery.DEFAULT_PROVIDER,
        "first-run provider default wrong")
-    settings.save_settings(settings.MODE_3D_SITE, True, "osm_standard")
+    # v0.3 -> v0.4 migration: a provider saved BEFORE the default flip (no
+    # "chosen" flag) is reset to the new default once...
+    params.SetString("ImageryProvider", "esri_world_imagery")
+    migrated = settings.load_settings()
+    ok(migrated["imagery_provider"] == imagery.DEFAULT_PROVIDER,
+       "pre-flip Esri value was not migrated to the new default")
+    # ...but a provider saved through save_settings (an explicit choice)
+    # sticks, including Esri.
+    settings.save_settings(settings.MODE_3D_SITE, True, "esri_world_imagery")
     saved = settings.load_settings()
     ok(saved["output_mode"] == settings.MODE_3D_SITE, "mode did not persist")
     ok(saved["include_buildings"] is True, "buildings choice did not persist")
-    ok(saved["imagery_provider"] == "osm_standard", "provider did not persist")
+    ok(saved["imagery_provider"] == "esri_world_imagery",
+       "explicitly chosen provider did not persist")
     settings.save_settings(settings.MODE_2D_MAP, False, imagery.DEFAULT_PROVIDER)
 
 

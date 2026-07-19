@@ -33,6 +33,13 @@ def load_settings():
     provider = params.GetString("ImageryProvider", imagery.DEFAULT_PROVIDER)
     if provider not in imagery.PROVIDERS:
         provider = imagery.DEFAULT_PROVIDER
+    # One-time migration for the v0.3 -> v0.4 default flip (Esri -> OSM).
+    # Before the flip the saved provider was just "whatever the last fetch
+    # used", not an explicit choice, so a pre-flip Esri value would silently
+    # pin the old default forever. Reset it once; from now on every save
+    # marks the value as chosen, so a deliberate Esri pick sticks.
+    if not params.GetBool("ImageryProviderChosen", False):
+        provider = imagery.DEFAULT_PROVIDER
     return {
         "output_mode": mode,
         "include_buildings": params.GetBool(
@@ -47,6 +54,7 @@ def save_settings(output_mode, include_buildings, imagery_provider):
     params.SetString("OutputMode", output_mode)
     params.SetBool("IncludeBuildings", bool(include_buildings))
     params.SetString("ImageryProvider", imagery_provider)
+    params.SetBool("ImageryProviderChosen", True)
 
 
 def fetch_plan(output_mode, include_buildings, want_terrain):
